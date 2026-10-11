@@ -86,7 +86,7 @@ button:focus-visible,.merken input:focus-visible{outline:2px solid var(--accent)
     }).then(function (zip) {
       return new Response(new Blob([zip]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     }).then(function (t) {
-      var d = JSON.parse(t), html = d.html;
+      var d = JSON.parse(t), html = d.html.replace('/*HAUS_K*/', 'window.HAUS_K = "' + b64(roh) + '";');   // damit die Seite ihre Dokumente später selbst entschlüsseln kann
       Object.keys(d.files).forEach(function (n) {
         var url = URL.createObjectURL(new Blob([unb64(d.files[n])], { type: /\.png$/.test(n) ? 'image/png' : 'image/jpeg' }));
         html = html.split(n).join(url);
