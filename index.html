@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Hausakte</title>
+<style>
+:root{--bg:#f3f1f0;--surface:#fff;--ink:#23252a;--ink-2:#565962;--line:#cfcac7;--accent:#9a4553;--accent-ink:#fff;--bad:#b3261e;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#17181b;--surface:#202227;--ink:#eeecea;--ink-2:#bcbab6;--line:#474950;--accent:#e3a6ae;--accent-ink:#2a1216;--bad:#f2867f;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+main{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px}
+h1{margin:0 0 4px;font-size:22px}
+p{margin:0 0 16px;color:var(--ink-2);font-size:14px}
+label{display:block;font-size:14px;margin-bottom:6px}
+input[type=password]{width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+input[type=password]:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.merken{display:flex;gap:8px;align-items:center;margin:12px 0 16px;font-size:14px;color:var(--ink-2)}
+button{width:100%;font:inherit;font-weight:600;border:0;border-radius:8px;padding:11px 12px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+button[disabled]{opacity:.6;cursor:progress}
+#msg{min-height:20px;margin:12px 0 0;font-size:14px;color:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Hausakte</h1>
+  <p>Dieser Bereich ist privat. Bitte das Passwort eingeben.</p>
+  <form id="f" autocomplete="on">
+    <label for="pw">Passwort</label>
+    <input type="password" id="pw" name="password" autocomplete="current-password" required autofocus>
+    <label class="merken"><input type="checkbox" id="mk" checked> Auf diesem Gerät merken</label>
+    <button type="submit" id="go">Öffnen</button>
+    <p id="msg" role="alert"></p>
+  </form>
+</main>
+<script>
+(function () {
+  var ITER = 600000, LS = 'hausakte-schluessel', f = document.getElementById('f'), msg = document.getElementById('msg'), go = document.getElementById('go');
+  var daten = null;
+  function hole() { return daten || (daten = fetch('daten.bin', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error('laden'); return r.arrayBuffer(); })); }
+  function b64(buf) { var s = '', a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
+  function unb64(t) { var s = atob(t), a = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+  function schluessel(pw, salt) {
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']).then(function (k) {
+      return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: salt, iterations: ITER }, k, 256);
+    });
+  }
+  function oeffne(roh, buf) {
+    var a = new Uint8Array(buf), kopf = a.slice(0, 3), iv = a.slice(19, 31);
+    return crypto.subtle.importKey('raw', roh, 'AES-GCM', false, ['decrypt']).then(function (k) {
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv, additionalData: kopf }, k, a.slice(31));
+    }).then(function (zip) {
+      return new Response(new Blob([zip]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    }).then(function (t) {
+      var d = JSON.parse(t), html = d.html;
+      Object.keys(d.files).forEach(function (n) {
+        var url = URL.createObjectURL(new Blob([unb64(d.files[n])], { type: /\.png$/.test(n) ? 'image/png' : 'image/jpeg' }));
+        html = html.split(n).join(url);
+      });
+      document.open(); document.write(html); document.close();
+    });
+  }
+  function fehler(t) { msg.textContent = t; go.disabled = false; go.textContent = 'Öffnen'; }
+  if (!(window.crypto && crypto.subtle && window.DecompressionStream)) { fehler('Dieser Browser ist zu alt für die Seite. Bitte einen aktuellen Browser nutzen.'); go.disabled = true; return; }
+  // gemerkter Schlüssel: gleich öffnen
+  var alt = null; try { alt = localStorage.getItem(LS); } catch (e) { }
+  if (alt) hole().then(function (buf) { return oeffne(unb64(alt), buf); }).catch(function () { try { localStorage.removeItem(LS); } catch (e) { } });
+  f.addEventListener('submit', function (ev) {
+    ev.preventDefault(); msg.textContent = ''; go.disabled = true; go.textContent = 'Öffne …';
+    var pw = document.getElementById('pw').value, merken = document.getElementById('mk').checked;
+    hole().then(function (buf) {
+      return schluessel(pw, new Uint8Array(buf).slice(3, 19)).then(function (roh) {
+        return oeffne(roh, buf).then(function () { if (merken) { try { localStorage.setItem(LS, b64(roh)); } catch (e) { } } });
+      });
+    }).catch(function (e) { fehler(e && e.message === 'laden' ? 'Die Daten ließen sich nicht laden. Bitte später noch einmal versuchen.' : 'Das Passwort stimmt nicht.'); });
+  });
+})();
+</script>
+</body>
+</html>
